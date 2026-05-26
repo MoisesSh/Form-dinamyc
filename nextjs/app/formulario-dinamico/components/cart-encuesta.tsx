@@ -1,6 +1,5 @@
 import {
   Button,
-  buttonVariants,
   Card,
   CardContent,
   Checkbox,
@@ -15,12 +14,19 @@ import {
   SelectValue,
   Separator,
 } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
 import { Plus, Trash, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { getCategorias } from "../api/api-categorias";
+import { createCategoria, getCategorias } from "../api/api-categorias";
 import { getTipoPreguntas } from "../api/api-tipo-encuesta";
-import { Badge } from "@/components/ui/badge";
+
+const VALIDATIONS = [
+  { value: "solo_letras", label: "Letras" },
+  { value: "solo_numeros", label: "Núm" },
+  { value: "alfanumerico", label: "Alfa" },
+] as const;
+
 interface CategoryOption {
   id_category: number;
   category: string;
@@ -29,23 +35,32 @@ interface CategoryOption {
     title: string;
   }[];
 }
+
+type OptionItem = {
+  id: number;
+  title: string;
+  id_categoria: number;
+};
+
 export function CartEncuesta() {
   const [event, setEvent] = useState<
-    | "texto_libre"
-    | "opcion_unica"
-    | "opcion_multiple"
-    | "escala_numerica"
-    | "fecha"
-    | string
+    "texto_libre" | "opcion_unica" | "opcion_multiple" | "fecha" | string
   >("texto_libre");
   const [title, setTitle] = useState<string>("");
-  const [textField, setTextField] = useState<{ title: string }[]>([]);
-  const [uniqueOption, setUniqueOption] = useState<
-    { id: number; title: string; id_categoria: number }[]
+  const [textField, setTextField] = useState<
+    {
+      title: string;
+      validation: { type: string; min: number; max: number };
+    }[]
   >([]);
+  const [dateField, setDateField] = useState<{ title: string }[]>([]);
+  const [uniqueOption, setUniqueOption] = useState<OptionItem[]>([]);
+  const [multipleOption, setMultipleOption] = useState<OptionItem[]>([]);
   const [isExistCategory, setIsExistCategory] = useState<boolean>(true);
   const [category, setCategory] = useState<string>("");
-  const { data: categorias } = useSWR(
+  const [newCategoryName, setNewCategoryName] = useState<string>("");
+  const [recommendCategory, setRecommendCategory] = useState<boolean>(false);
+  const { data: categorias, mutate: mutateCategorias } = useSWR(
     "api/categorias",
     async () => await getCategorias(),
   );
@@ -55,8 +70,13 @@ export function CartEncuesta() {
     async () => await getTipoPreguntas(),
   );
 
+  const options: OptionItem[] =
+    event === "opcion_multiple" ? multipleOption : uniqueOption;
+  const setOptions =
+    event === "opcion_multiple" ? setMultipleOption : setUniqueOption;
+
   const categoryOptions = useMemo<CategoryOption[]>(() => {
-    return uniqueOption.reduce((acc, opt) => {
+    return options.reduce((acc, opt) => {
       const categoria =
         categorias?.find((c) => c.id === opt.id_categoria)?.categoria ??
         "Sin categoría";
@@ -72,35 +92,71 @@ export function CartEncuesta() {
       }
       return acc;
     }, [] as CategoryOption[]);
-  }, [uniqueOption, categorias]);
+  }, [options, categorias]);
 
   const textFieldFn = () => {
-    setTextField((prev) => [...prev, { title: title }]);
+    setTextField((prev) => [
+      ...prev,
+      {
+        title: title,
+        validation: { type: "solo_letras", min: 0, max: 0 },
+      },
+    ]);
   };
   const deleteTextField = (index: number) => {
     setTextField((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const uniqueOptionFn = () => {
-    setUniqueOption((prev) => {
-      const newUniqueOption = [
+  const dateFieldFn = () => {
+    setDateField((prev) => [...prev, { title: title }]);
+  };
+  const deleteDateField = (index: number) => {
+    setDateField((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const addOptionFn = async () => {
+    if (!isExistCategory && !newCategoryName.trim()) return;
+
+    let categoriaId: number;
+
+    if (!isExistCategory) {
+      try {
+        const nuevaCategoria = await createCategoria({
+          categoria: newCategoryName.trim(),
+          es_sugerencia: recommendCategory,
+        });
+        categoriaId = nuevaCategoria.id;
+        mutateCategorias();
+        setNewCategoryName("");
+        setRecommendCategory(false);
+        setIsExistCategory(true);
+      } catch {
+        return;
+      }
+    } else {
+      categoriaId = Number.parseInt(category);
+      if (!categoriaId) return;
+    }
+
+    setOptions((prev) => {
+      const newOption = [
         ...prev,
         {
           id: (prev[prev.length - 1]?.id ?? 0) + 1,
           title: "",
-          id_categoria: Number.parseInt(category),
+          id_categoria: categoriaId,
         },
       ];
-      return newUniqueOption;
+      return newOption;
     });
   };
   const deleteAllCategoryOptions = (idCategoria: number) => {
-    setUniqueOption((prev) =>
+    setOptions((prev) =>
       prev.filter((opt) => opt.id_categoria !== idCategoria),
     );
   };
   const deleteOption = (id: number) => {
-    setUniqueOption((prev) => prev.filter((opt) => opt.id !== id));
+    setOptions((prev) => prev.filter((opt) => opt.id !== id));
   };
   const isExistCategoryFn = () => {
     setIsExistCategory((prev) => !prev);
@@ -110,13 +166,13 @@ export function CartEncuesta() {
       textFieldFn();
     }
     if (event === "opcion_unica") {
-      uniqueOptionFn();
+      addOptionFn();
     }
     if (event === "opcion_multiple") {
-    }
-    if (event === "escala_numerica") {
+      addOptionFn();
     }
     if (event === "fecha") {
+      dateFieldFn();
     }
   };
   return (
@@ -152,7 +208,7 @@ export function CartEncuesta() {
           </div>
           {event !== "texto_libre" && <Separator className="mt-2 mb-2" />}
           <div className="flex flex-col gap-2">
-            {categoryOptions.length > 0 && (
+            {(event === "opcion_unica" || event === "opcion_multiple") && (
               <Card>
                 <CardContent>
                   <div className="relative w-full mt-4 flex flex-col">
@@ -185,10 +241,21 @@ export function CartEncuesta() {
                           </>
                         ) : (
                           <>
-                            <Input placeholder="Nueva Categoria" />
+                            <Input
+                              placeholder="Nueva Categoria"
+                              value={newCategoryName}
+                              onChange={(e) =>
+                                setNewCategoryName(e.target.value)
+                              }
+                            />
                             <Label>
                               ¿Recomendar Categoria?
-                              <Checkbox />
+                              <Checkbox
+                                checked={recommendCategory}
+                                onCheckedChange={(checked) =>
+                                  setRecommendCategory(checked === true)
+                                }
+                              />
                             </Label>
                           </>
                         )}
@@ -197,13 +264,20 @@ export function CartEncuesta() {
                       <Button
                         className=" top-0 right-0  text-sm "
                         type="button"
-                        onClick={() => uniqueOptionFn()}
+                        onClick={() => addOptionFn()}
                       >
                         Agregar Opcion
                         <Plus />
                       </Button>
                     </div>
-
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {categoryOptions.length > 0 && (
+              <Card>
+                <CardContent>
+                  <div className="relative w-full mt-4 flex flex-col">
                     {categoryOptions.map((group) => {
                       return (
                         <div
@@ -227,27 +301,35 @@ export function CartEncuesta() {
                           </div>
                           <Separator className="mt-2" />
 
-                          <div className="flex flex-col gap-2 mt-6 grow">
+                          <div
+                            className={
+                              event === "opcion_multiple"
+                                ? "grid grid-cols-3 gap-2 mt-6"
+                                : "flex flex-col gap-2 mt-6 grow"
+                            }
+                          >
                             {group.options.map((opt, optIdx) => {
                               return (
                                 <div
                                   key={`${group.id_category}-${optIdx}`}
                                   className="flex gap-2"
                                 >
-                                  <div className="flex grow">
-                                    <Checkbox
-                                      className="self-center"
-                                      disabled
-                                    />{" "}
+                                  <div className="flex grow items-center gap-1">
+                                    {event === "opcion_unica" ? (
+                                      <div className="h-4 w-4 rounded-full border-2 border-primary self-center shrink-0" />
+                                    ) : (
+                                      <Checkbox
+                                        className="self-center shrink-0"
+                                        disabled
+                                      />
+                                    )}
                                     <Input
                                       placeholder="Titulo..."
-                                      className="border-l-0 border-r-0 border-t-0 rounded-none transition-all hover:border-b-2 ring-offset-0 focus:outline-none  focus-visible:ring-0 "
+                                      className="border-l-0 border-r-0 border-t-0 rounded-none transition-all hover:border-b-2 ring-offset-0 focus:outline-none focus-visible:ring-0 grow min-w-0"
                                       onChange={(e) =>
-                                        setUniqueOption((prev) =>
+                                        setOptions((prev) =>
                                           prev.map((u) =>
-                                            u.id_categoria ===
-                                              group.id_category &&
-                                            u.title === opt.title
+                                            u.id === opt.id
                                               ? { ...u, title: e.target.value }
                                               : u,
                                           ),
@@ -261,7 +343,6 @@ export function CartEncuesta() {
                                       onClick={() => deleteOption(opt.id)}
                                     >
                                       <Trash2 />
-                                      Eliminar Opción
                                     </Button>
                                   </div>
                                 </div>
@@ -285,13 +366,127 @@ export function CartEncuesta() {
                     >
                       <div className="grow">
                         <Label>{v.title}</Label>
-                        <Input />
+                        <div className="flex gap-2 items-center">
+                          <Input className="grow" />
+                          <div className="flex gap-0.5 shrink-0">
+                            {VALIDATIONS.map((val) => (
+                              <Badge
+                                key={val.value}
+                                variant={
+                                  v.validation.type === val.value
+                                    ? "default"
+                                    : "outline"
+                                }
+                                className="cursor-pointer text-[10px] px-1 py-0 h-5 select-none"
+                                onClick={() =>
+                                  setTextField((prev) =>
+                                    prev.map((tf, idx) =>
+                                      idx === i
+                                        ? {
+                                            ...tf,
+                                            validation: {
+                                              ...tf.validation,
+                                              type:
+                                                tf.validation.type === val.value
+                                                  ? ""
+                                                  : val.value,
+                                            },
+                                          }
+                                        : tf,
+                                    ),
+                                  )
+                                }
+                              >
+                                {val.label}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mt-1 items-center text-xs text-muted-foreground">
+                          <span className="text-[11px] text-muted-foreground shrink-0">
+                            {v.validation.type === "solo_numeros"
+                              ? "Rango numérico"
+                              : "Caracteres"}
+                            :
+                          </span>
+                          <Label className="text-xs">Min</Label>
+                          <Input
+                            type="number"
+                            className="w-16 h-7 text-xs"
+                            placeholder="0"
+                            min={0}
+                            value={v.validation.min || ""}
+                            onChange={(e) =>
+                              setTextField((prev) =>
+                                prev.map((tf, idx) =>
+                                  idx === i
+                                    ? {
+                                        ...tf,
+                                        validation: {
+                                          ...tf.validation,
+                                          min: Number(e.target.value),
+                                        },
+                                      }
+                                    : tf,
+                                ),
+                              )
+                            }
+                          />
+                          <Label className="text-xs">Max</Label>
+                          <Input
+                            type="number"
+                            className="w-16 h-7 text-xs"
+                            placeholder="0"
+                            min={0}
+                            value={v.validation.max || ""}
+                            onChange={(e) =>
+                              setTextField((prev) =>
+                                prev.map((tf, idx) =>
+                                  idx === i
+                                    ? {
+                                        ...tf,
+                                        validation: {
+                                          ...tf.validation,
+                                          max: Number(e.target.value),
+                                        },
+                                      }
+                                    : tf,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
                       </div>
                       <Button
                         type="button"
                         variant={"destructive"}
                         className="self-center"
                         onClick={() => deleteTextField(i)}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+            {dateField.length > 0 && (
+              <Card>
+                <CardContent>
+                  {dateField.map((v, i) => (
+                    <div
+                      key={i}
+                      className="flex flex-row gap-2 justify-around space-y-5"
+                    >
+                      <div className="grow">
+                        <Label>{v.title}</Label>
+                        <Input type="date" className="grow" />
+                      </div>
+                      <Button
+                        type="button"
+                        variant={"destructive"}
+                        className="self-center"
+                        onClick={() => deleteDateField(i)}
                       >
                         <X />
                       </Button>

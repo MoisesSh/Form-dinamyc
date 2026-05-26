@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-let seleccionables = [
+const seleccionables = [
   { id: 1, pregunta_id: 1, elemento: "Nivel de satisfacción" },
   { id: 2, pregunta_id: 1, elemento: "Calidad del producto" },
   { id: 3, pregunta_id: 2, elemento: "Atención al cliente" },

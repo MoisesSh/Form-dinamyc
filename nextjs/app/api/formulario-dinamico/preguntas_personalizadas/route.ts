@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-let preguntas_personalizadas = [
+const preguntas_personalizadas = [
   {
     id: 1,
     titulo: "¿Cuál es tu color favorito?",

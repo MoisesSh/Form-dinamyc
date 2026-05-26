@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-export let configuraciones = [
+export const configuraciones = [
   {
     id: 1,
     fecha_estimada: "2025-12-31",
